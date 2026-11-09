@@ -72,15 +72,16 @@ You can bind variables in your C programs to names on the expression. Example:
 
 
 EXTENDING WITH CUSTOM FUNCTIONS
+
 You can extend the library by defining the macro FOR_MP_CFUNC before its
 implementation. Example:
 
-float lerp(float from, float to, float i);
-float compute(float x);
-
-#define FOR_MP_CFUNC(DO) \
-	DO(lerp,    MP_FUNC3, "lerp") \
-	DO(compute, MP_FUNC1, "compute")
+	float lerp(float from, float to, float i);
+	float compute(float x);
+	
+	#define FOR_MP_CFUNC(DO) \
+		DO(lerp,    MP_FUNC3, "lerp") \
+		DO(compute, MP_FUNC1, "compute")
 
 The first argument is the C function. The second argument is the number
 of arguments the function takes (MP_FUNC1, MP_FUNC2, MP_FUNC3). The
