@@ -38,37 +38,38 @@ PUBLIC API
 	
 	MP_Compile: returns a MP_Expr. Args:
 		const char *: valid C string with an expression.
-		const MP_Var *: an array of variables to be used in the expression.
+		MP_StrArray: an array of variable names to be used in the expression.
 		int num_vars: the size of the array.
 		int *error: error for error handling. error == 0 means the expression
 		compiled successfully.
 		
 	MP_Eval: returns the result of the expression. Args:
 		const MP_Expr *expr: a valid expression with no compilations errors.
+		const float *: an array of the variables matching the order of its
+		names passed to the MP_Compile function.
 
 	MP_Free: frees the memory used by MP_Expr. Args:
-		MP_Free *: A pointer to a compiled expression.
+		MP_Expr *: A pointer to a compiled expression.
 
 BINDING VARIABLES
 
 You can bind variables in your C programs to names on the expression. Example:
 
-	float x;
-
-	MP_Var vars[] = {
-		{
-			.name = "x",
-			.address = &x,
-		},
+	const char *const var_names[] = {
+		"x", "y"
 	};
 
-	MP_Expr expr = MP_Compile("x*2", vars, 1, NULL);
-	
-	x = 0.5f;
-	float v1 = MP_Eval(&expr); // 1.0f
+	float var_list[2];
 
-	x = 1.5f;
-	float v2 = MP_Eval(&expr); // 3.0f
+	MP_Expr expr = MP_Compile("x*y", var_names, 2, NULL);
+	
+	var_list[0] = 0.5f;
+	var_list[1] = 3.0f;
+	float v1 = MP_Eval(&expr, var_list); // 1.5f
+
+	var_list[0] = 0.5f;
+	var_list[1] = 2.5f;
+	float v2 = MP_Eval(&expr, var_list); // 1.25f
 
 
 EXTENDING WITH CUSTOM FUNCTIONS
@@ -126,7 +127,7 @@ typedef struct MP_Token {
 
 	union {
 		float number;
-		const float *variable;
+		int variable_index;
 		int operation;
 	} data;
 } MP_Token;
@@ -152,9 +153,11 @@ void MP_DebugPrintTokenArray(const MP_TokenArray *list);
 void MP_DebugPrintExpr(const MP_Expr *expr);
 #endif
 
-MP_Expr MP_Compile(const char *str, const MP_Var *vars, int num_vars, int *error);
+typedef const char *const *MP_StrArray;
+
+MP_Expr MP_Compile(const char *str, MP_StrArray vars, int num_vars, int *error);
 void MP_Free(MP_Expr *expr);
-float MP_Eval(const MP_Expr *expr);
+float MP_Eval(const MP_Expr *expr, const float *vars);
 
 #endif /* MPARSE_H */
 
@@ -262,11 +265,9 @@ static const int mp_op_arity[] = {
 #undef EXPAND_AS_ARITY
 
 static char * MP_CleanWhitespace(const char *str);
-static bool MP_FindToken(const char *str, MP_Token *token, int *jump_len);
+static bool MP_FindToken(const char *str, MP_StrArray vars, int num_vars, MP_Token *token, int *jump_len);
 static bool MP_FindNumber(const char *str, int len, MP_Token *token);
-static bool MP_FindVar(const char *str, int len, const MP_Var *vars, int num_vars, MP_Token *token);
-static bool MP_FindVarNum(const char *str, int i, int prev_token_offset, const MP_Var *vars, int num_vars, MP_Token *token);
-static MP_TokenArray MP_ParseTokens(const char *str, const MP_Var *vars, int num_vars, int *error);
+static MP_TokenArray MP_ParseTokens(const char *str, MP_StrArray vars, int num_vars, int *error);
 static void MP_CheckMatchingBrackets(const MP_TokenArray *list, int *error);
 static void MP_CheckUnaryOperators(MP_TokenArray *list);
 static void MP_ValidateRPN(const MP_TokenArray *list, int *max_depth, int *error);
@@ -295,8 +296,7 @@ static char * MP_CleanWhitespace(const char *str) {
 	return cleaned;
 }
 
-static bool MP_FindToken(const char *str, MP_Token *token, int *jump_len) {
-	int best_match_index = -1;
+static bool MP_FindToken(const char *str, MP_StrArray vars, int num_vars, MP_Token *token, int *jump_len) {
 	int best_match_len = 0;
 
 	token->type = MP_TOKENTYPE_NONE;
@@ -326,16 +326,29 @@ static bool MP_FindToken(const char *str, MP_Token *token, int *jump_len) {
 
 		if(len > best_match_len) {
 			best_match_len = len;
-			best_match_index = i;
+
+			token->type = MP_TOKENTYPE_OPERATION;
+			token->data.operation = i;
+		}
+	}
+	
+	for(int i = 0; i < num_vars; i++) {
+		int len = strlen(vars[i]);
+
+		if(strncmp(str, vars[i], len) != 0) continue;
+
+		if(len > best_match_len) {
+			best_match_len = len;
+
+			token->type = MP_TOKENTYPE_VARIABLE;
+			token->data.variable_index = i;
 		}
 	}
 
-	if(best_match_index < 0) {
+	if(best_match_len == 0) {
 		return false;
 	}
 
-	token->type = MP_TOKENTYPE_OPERATION;
-	token->data.operation = best_match_index;
 	*jump_len = best_match_len;
 
 	return true;
@@ -381,41 +394,7 @@ static bool MP_FindNumber(const char *str, int len, MP_Token *token) {
 	return true;
 }
 
-static bool MP_FindVar(const char *str, int len, const MP_Var *vars, int num_vars, MP_Token *token) {
-	for(int i = 0; i < num_vars; i++) {
-		if((int) strlen(vars[i].name) != len) {
-			continue;
-		}
-
-		if(strncmp(str, vars[i].name, len) != 0) {
-			continue;
-		}
-
-		token->type = MP_TOKENTYPE_VARIABLE;
-		token->data.variable = vars[i].address;
-
-		return true;
-	}
-
-	return false;
-}
-
-static bool MP_FindVarNum(const char *str, int i, int prev_token_offset, const MP_Var *vars, int num_vars, MP_Token *token) {
-	const char *start_str = str + prev_token_offset;
-	int len = i - prev_token_offset;
-
-	if(MP_FindNumber(start_str, len, token)) {
-		return true;
-	}
-
-	if(MP_FindVar(start_str, len, vars, num_vars, token)) {
-		return true;
-	}
-
-	return false;
-}
-
-static MP_TokenArray MP_ParseTokens(const char *str, const MP_Var *vars, int num_vars, int *error) {
+static MP_TokenArray MP_ParseTokens(const char *str, MP_StrArray vars, int num_vars, int *error) {
 	MP_TokenArray list;
 	int i, prev_token_offset, len;
 
@@ -429,7 +408,7 @@ static MP_TokenArray MP_ParseTokens(const char *str, const MP_Var *vars, int num
 		MP_Token token;
 		int jump_len;
 
-		if(!MP_FindToken(str + i, &token, &jump_len)) {
+		if(!MP_FindToken(str + i, vars, num_vars, &token, &jump_len)) {
 			i++;
 			continue;
 		}
@@ -437,12 +416,9 @@ static MP_TokenArray MP_ParseTokens(const char *str, const MP_Var *vars, int num
 		if(i > prev_token_offset) {
 			MP_Token token_num;
 
-			bool found = MP_FindVarNum(
-					str,
-					i,
-					prev_token_offset,
-					vars,
-					num_vars,
+			bool found = MP_FindNumber(
+					str + prev_token_offset,
+					i - prev_token_offset,
 					&token_num
 					);
 
@@ -464,12 +440,9 @@ static MP_TokenArray MP_ParseTokens(const char *str, const MP_Var *vars, int num
 	if(i > prev_token_offset) {
 		MP_Token token_num;
 
-		bool found = MP_FindVarNum(
-				str,
-				i,
-				prev_token_offset,
-				vars,
-				num_vars,
+		bool found = MP_FindNumber(
+				str + prev_token_offset,
+				i - prev_token_offset,
 				&token_num
 				);
 
@@ -681,7 +654,7 @@ void MP_DebugPrintToken(const MP_Token *token) {
 			break;
 
 		case MP_TOKENTYPE_VARIABLE:
-			printf("var[%p]", (void *) token->data.variable);
+			printf("var[%d]", token->data.variable_index);
 			break;
 	}
 }
@@ -699,7 +672,7 @@ void MP_DebugPrintExpr(const MP_Expr *expr) {
 }
 #endif /* MPARSE_DEBUG */
 
-MP_Expr MP_Compile(const char *str, const MP_Var *vars, int num_vars, int *error) {
+MP_Expr MP_Compile(const char *str, MP_StrArray vars, int num_vars, int *error) {
 	MP_Expr expr = {0};
 
 	MP_TokenArray input_list;
@@ -741,7 +714,7 @@ void MP_Free(MP_Expr *expr) {
 	MP_AFREE(expr->output);
 }
 
-float MP_Eval(const MP_Expr *expr) {
+float MP_Eval(const MP_Expr *expr, const float *vars) {
 	if(expr->output.len == 0) {
 		return 0.0f;
 	}
@@ -759,7 +732,7 @@ float MP_Eval(const MP_Expr *expr) {
 				break;
 
 			case MP_TOKENTYPE_VARIABLE:
-				*(sp++) = *(token->data.variable);
+				*(sp++) = vars[token->data.variable_index];
 				break;
 
 			case MP_TOKENTYPE_OPERATION:

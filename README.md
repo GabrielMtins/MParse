@@ -2,7 +2,7 @@
 
 MParse is a small, header-only C99 library for parsing and evaluating
 mathematical expressions. It compiles an expression once into Reverse Polish
-Notation (RPN), then it can evalute it.
+Notation (RPN), then it can evaluate it.
 
 The library is designed for use cases where the same expression is evaluated
 many times with different variable values, such as plotting graphics. Thus,
@@ -12,7 +12,7 @@ The library only depends on the **C standard library**.
 
 MParse is distributed under the **zlib license**.
 
-# Design
+# Features
 
 The library supports the following operations:
 
@@ -23,10 +23,11 @@ The library supports the following operations:
 
 The library can also be extended with custom functions via x-macros.
 
-It also supports custom variables bound by name to a `float *`. The library
-**only uses floats**.
+It also supports variables, declared by name in `MP_Compile` and passed by
+value in `MP_Eval`. The library only uses float.
 
-It also compiles in C99, with `-Wall -Wextra -pedantic` without warnings.
+It also compiles in C99, with `-Wall -Wextra -pedantic` without warnings on
+**GCC** and **Clang**.
 
 # Usage
 
@@ -45,37 +46,47 @@ int error;
 MP_Expr expr = MP_Compile("2 + 3 * 4", NULL, 0, &error);
 
 if(error == 0) {
-    float value = MP_Eval(&expr);
+    float value = MP_Eval(&expr, NULL);
     MP_Free(&expr);
 }
 ```
 
+The expression read by `MP_Eval` must be a valid expression, compiled with no
+errors. If it is not a valid expression, it will return 0.0f as a fallback.
+
 # Variables
 
-`MP_Compile` accepts an array of `MP_Var`, each binding a name to a `float *`.
-The value is read at evaluation time, so it can change between calls to
-`MP_Eval`:
+`MP_Compile` accepts a `MP_StrArray`, an array of strings containing the names
+of the variables used in the expression. `MP_StrArray` is a `typedef const char
+*const *`.
+
+`MP_Eval` accepts a `const float *`, an array of floats containing the values
+of each variable matching the order of the names passed via `MP_StrArray`.
 
 ```c
-float x = 2.0f;
-MP_Var vars[] = {
-    { "x", &x },
+const char *const var_names[] = {
+	"x", "y"
 };
 
-int error = 0;
-MP_Expr expr = MP_Compile("x * x + 1", vars, 1, &error);
-/* ... */
+float var_list[2];
 
-float a = MP_Eval(&expr);  /* 5.0f */
+MP_Expr expr = MP_Compile("x*y", var_names, 2, NULL);
 
-x = 3.0f;
-float b = MP_Eval(&expr);  /* 10.0f */
+var_list[0] = 0.5f;
+var_list[1] = 3.0f;
+float v1 = MP_Eval(&expr, var_list); // 1.5f
 
-MP_Free(&expr);
+var_list[0] = 0.5f;
+var_list[1] = 2.5f;
+float v2 = MP_Eval(&expr, var_list); // 1.25f
 ```
 
-The address of the variable must **not** be NULL, or else the program will seg
-fault. It does not check if the address is NULL at evaluation time.
+`var_list` and `var_names` must have the same size, or else the behavior is
+undefined (UB).
+
+Passing the variable values on the `MP_Eval` function means that this library
+is **thread-safe**. Once the expression is compiled, it can be evaluated in
+multiple threads without locking if each thread has its own `var_list`.
 
 # Extending with custom functions
 
@@ -109,7 +120,7 @@ int error;
 MP_Expr expr = MP_Compile("lerp(compute(0.1), compute(3.5), 0.5)", NULL, 0, &error);
 
 if(error == 0) {
-    float value = MP_Eval(&expr);
+    float value = MP_Eval(&expr, NULL);
     MP_Free(&expr);
 }
 ```
