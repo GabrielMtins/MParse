@@ -1,5 +1,5 @@
-#ifndef MPARSER_H
-#define MPARSER_H
+#ifndef MPARSE_H
+#define MPARSE_H
 
 /* LICENSE
 Copyright (c) 2026 Gabriel Martins
@@ -88,8 +88,6 @@ of arguments the function takes (MP_FUNC1, MP_FUNC2, MP_FUNC3). The
 third argument is the name of the function in the expression.
 */
 
-#define MPARSE_IMPLEMENTATION
-
 #define MP_FUNC1(sp, func) \
 	do { \
 		float a = *(--(sp)); \
@@ -157,6 +155,8 @@ void MP_DebugPrintExpr(const MP_Expr *expr);
 MP_Expr MP_Compile(const char *str, const MP_Var *vars, int num_vars, int *error);
 void MP_Free(MP_Expr *expr);
 float MP_Eval(const MP_Expr *expr);
+
+#endif /* MPARSE_H */
 
 #ifdef MPARSE_IMPLEMENTATION
 
@@ -765,5 +765,3 @@ float MP_Eval(const MP_Expr *expr) {
 }
 
 #endif /* MPARSE_IMPLEMENTATION */
-
-#endif
