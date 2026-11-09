@@ -146,7 +146,7 @@ typedef struct MP_Expr {
 	int max_depth;
 } MP_Expr;
 
-#ifdef MP_DEBUG
+#ifdef MPARSE_DEBUG
 void MP_DebugPrintToken(const MP_Token *token);
 void MP_DebugPrintTokenArray(const MP_TokenArray *list);
 void MP_DebugPrintExpr(const MP_Expr *expr);
@@ -611,9 +611,19 @@ static MP_TokenArray MP_InfixToRPN(const MP_TokenArray *input_list) {
 				break;
 
 			case MP_TOKENTYPE_CLOSE_BRACKET:
-				while(operation_stack.len) {
+				while(operation_stack.len > 0) {
 					if(MP_ALAST(operation_stack).type == MP_TOKENTYPE_OPEN_BRACKET) {
 						(void) MP_APOP(operation_stack);
+						break;
+					}
+
+					MP_APUSH(output, MP_APOP(operation_stack));
+				}
+				break;
+
+			case MP_TOKENTYPE_COMMA:
+				while(operation_stack.len > 0) {
+					if(MP_ALAST(operation_stack).type == MP_TOKENTYPE_OPEN_BRACKET) {
 						break;
 					}
 
@@ -651,7 +661,7 @@ static void MP_DoOperation(float **sp, int op) {
 	#undef EXPAND_AS_CASE
 }
 
-#ifdef MP_DEBUG
+#ifdef MPARSE_DEBUG
 void MP_DebugPrintToken(const MP_Token *token) {
 	switch(token->type) {
 		case MP_TOKENTYPE_OPEN_BRACKET:
@@ -687,7 +697,7 @@ void MP_DebugPrintTokenArray(const MP_TokenArray *list) {
 void MP_DebugPrintExpr(const MP_Expr *expr) {
 	MP_DebugPrintTokenArray(&expr->output);
 }
-#endif /* MP_DEBUG */
+#endif /* MPARSE_DEBUG */
 
 MP_Expr MP_Compile(const char *str, const MP_Var *vars, int num_vars, int *error) {
 	MP_Expr expr = {0};
