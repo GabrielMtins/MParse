@@ -732,13 +732,13 @@ void MP_Free(MP_Expr *expr) {
 }
 
 float MP_Eval(const MP_Expr *expr) {
-	float stack[expr->max_depth], *sp;
-
-	sp = stack;
-
 	if(expr->output.len == 0) {
 		return 0.0f;
 	}
+
+	float stack[expr->max_depth], *sp;
+
+	sp = stack;
 
 	for(int i = 0; i < expr->output.len; i++) {
 		const MP_Token *token = &expr->output.data[i];
