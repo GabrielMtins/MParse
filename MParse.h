@@ -1,32 +1,116 @@
 #ifndef MPARSER_H
 #define MPARSER_H
 
-#include "stb_ds.h"
+/* LICENSE
+Copyright (c) 2026 Gabriel Martins
+
+This software is provided 'as-is', without any express or implied warranty. In
+no event will the authors be held liable for any damages arising from the use of
+this software.
+
+Permission is granted to anyone to use this software for any purpose, including
+commercial applications, and to alter it and redistribute it freely, subject to
+the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not claim
+that you wrote the original software. If you use this software in a product, an
+acknowledgment in the product documentation would be appreciated but is not
+required.
+2. Altered source versions must be plainly marked as such, and must not be
+misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
+*/
+
+/* QUICK DOCUMENTATION
+
+USAGE
+
+MParser is a header-only library for parsing and evaluating mathematical
+expressions.
+
+Define MPARSE_IMPLEMENTATION in a **single** source file before
+including the library:
+
+	#define MPARSE_IMPLEMENTATION
+	#include "MParse.h"
+
+PUBLIC API
+	
+	MP_Compile: returns a MP_Expr. Args:
+		const char *: valid C string with an expression.
+		const MP_Var *: an array of variables to be used in the expression.
+		int num_vars: the size of the array.
+		int *error: error for error handling. error == 0 means the expression
+		compiled successfully.
+		
+	MP_Eval: returns the result of the expression. Args:
+		const MP_Expr *expr: a valid expression with no compilations errors.
+
+	MP_Free: frees the memory used by MP_Expr. Args:
+		MP_Free *: A pointer to a compiled expression.
+
+BINDING VARIABLES
+
+You can bind variables in your C programs to names on the expression. Example:
+
+	float x;
+
+	MP_Var vars[] = {
+		{
+			.name = "x",
+			.address = &x,
+		},
+	};
+
+	MP_Expr expr = MP_Compile("x*2", vars, 1, NULL);
+	
+	x = 0.5f;
+	float v1 = MP_Eval(&expr); // 1.0f
+
+	x = 1.5f;
+	float v2 = MP_Eval(&expr); // 3.0f
+
+
+EXTENDING WITH CUSTOM FUNCTIONS
+You can extend the library by defining the macro FOR_MP_CFUNC before its
+implementation. Example:
+
+float lerp(float from, float to, float i);
+float compute(float x);
+
+#define FOR_MP_CFUNC(DO) \
+	DO(lerp,    MP_FUNC3, "lerp") \
+	DO(compute, MP_FUNC1, "compute")
+
+The first argument is the C function. The second argument is the number
+of arguments the function takes (MP_FUNC1, MP_FUNC2, MP_FUNC3). The
+third argument is the name of the function in the expression.
+*/
 
 #define MPARSE_IMPLEMENTATION
 
-#define MP_FUNC1(stack, func) \
+#define MP_FUNC1(sp, func) \
 	do { \
-		float a = arrpop(stack); \
+		float a = *(--(sp)); \
 		float res = func(a); \
-		arrpush(stack, res); \
+		*((sp)++) = res; \
 	} while(0)
 
-#define MP_FUNC2(stack, func) \
+#define MP_FUNC2(sp, func) \
 	do { \
-		float a = arrpop(stack); \
-		float b = arrpop(stack); \
+		float a = *(--(sp)); \
+		float b = *(--(sp)); \
 		float res = func(b, a); \
-		arrpush(stack, res); \
+		*((sp)++) = res; \
 	} while(0)
 
-#define MP_FUNC3(stack, func) \
+#define MP_FUNC3(sp, func) \
 	do { \
-		float a = arrpop(stack); \
-		float b = arrpop(stack); \
-		float c = arrpop(stack); \
+		float a = *(--(sp)); \
+		float b = *(--(sp)); \
+		float c = *(--(sp)); \
 		float res = func(c, b, a); \
-		arrpush(stack, res); \
+		*((sp)++) = res; \
 	} while(0)
 
 #define MP_FUNC1_ARITY 1
@@ -53,15 +137,19 @@ typedef struct MP_Var {
 	const float *address;
 } MP_Var;
 
-typedef MP_Token * MP_TokenList;
+typedef struct MP_TokenArray {
+	MP_Token *data;
+	int len;
+} MP_TokenArray;
 
 typedef struct MP_Expr {
-	MP_TokenList output;
+	MP_TokenArray output;
+	int max_depth;
 } MP_Expr;
 
 #ifdef MP_DEBUG
 void MP_DebugPrintToken(const MP_Token *token);
-void MP_DebugPrintTokenList(MP_TokenList list);
+void MP_DebugPrintTokenArray(const MP_TokenArray *list);
 void MP_DebugPrintExpr(const MP_Expr *expr);
 #endif
 
@@ -77,6 +165,12 @@ float MP_Eval(const MP_Expr *expr);
 #include <string.h>
 #include <ctype.h>
 #include <stdbool.h>
+
+#define MP_ACREATE(size) (MP_TokenArray) {.len = 0, .data = (MP_Token *) malloc((size) * sizeof(MP_Token))}
+#define MP_APUSH(array, p) ((array).data[(array).len++] = p)
+#define MP_APOP(array) ((array).data[--(array).len])
+#define MP_ALAST(array) ((array).data[(array).len - 1])
+#define MP_AFREE(array) do { free((array).data); (array).len = 0; (array).data = NULL; } while(0)
 
 #define MP_MACRO_ADD(x, y) (x + y)
 #define MP_MACRO_SUB(x, y) (x - y)
@@ -94,14 +188,16 @@ float MP_Eval(const MP_Expr *expr);
 	DO(MP_OP_PLUS,  MP_MACRO_PLUS,  MP_FUNC1, "+", 4) 
 
 #define FOR_MP_MFUNC(DO) \
-	DO(MP_MFUNC_COS, cosf,   MP_FUNC1, "cos",  5) \
-	DO(MP_MFUNC_SIN, sinf,   MP_FUNC1, "sin",  5) \
-	DO(MP_MFUNC_TAN, tanf,   MP_FUNC1, "tan",  5) \
-	DO(MP_MFUNC_LOG, log10f, MP_FUNC1, "log",  5) \
-	DO(MP_MFUNC_LN,  logf,   MP_FUNC1, "ln",   5) \
-	DO(MP_MFUNC_EXP, expf,   MP_FUNC1, "exp",  5) \
-	DO(MP_MFUNC_ABS, fabsf,  MP_FUNC1, "abs",  5) \
-	DO(MP_MFUNC_POW, powf,   MP_FUNC2, "pow",  5)
+	DO(MP_MFUNC_COS,  cosf,   MP_FUNC1, "cos",  5) \
+	DO(MP_MFUNC_SIN,  sinf,   MP_FUNC1, "sin",  5) \
+	DO(MP_MFUNC_TAN,  tanf,   MP_FUNC1, "tan",  5) \
+	DO(MP_MFUNC_LOG,  log10f, MP_FUNC1, "log",  5) \
+	DO(MP_MFUNC_LN,   logf,   MP_FUNC1, "ln",   5) \
+	DO(MP_MFUNC_EXP,  expf,   MP_FUNC1, "exp",  5) \
+	DO(MP_MFUNC_ABS,  fabsf,  MP_FUNC1, "abs",  5) \
+	DO(MP_MFUNC_SQRT, sqrtf,  MP_FUNC1, "sqrt", 5) \
+	DO(MP_MFUNC_CBRT, cbrtf,  MP_FUNC1, "cbrt", 5) \
+	DO(MP_MFUNC_POW,  powf,   MP_FUNC2, "pow",  5)
 
 #define MP_CFUNC_ID(func) MP_CFUNC_ID_##func
 
@@ -164,36 +260,36 @@ static const int mp_op_arity[] = {
 };
 #undef EXPAND_AS_ARITY
 
-typedef float * FloatVector;
-typedef char * CharVector;
-
-static CharVector MP_CleanWhitespace(const char *str);
+static char * MP_CleanWhitespace(const char *str);
 static bool MP_FindToken(const char *str, MP_Token *token, int *jump_len);
 static bool MP_FindNumber(const char *str, int len, MP_Token *token);
 static bool MP_FindVar(const char *str, int len, const MP_Var *vars, int num_vars, MP_Token *token);
 static bool MP_FindVarNum(const char *str, int i, int prev_token_offset, const MP_Var *vars, int num_vars, MP_Token *token);
-static MP_TokenList MP_ParseTokens(const char *str, const MP_Var *vars, int num_vars, int *error);
-static void MP_CheckMatchingBrackets(const MP_TokenList list, int *error);
-static void MP_CheckUnaryOperators(MP_TokenList list);
-static void MP_ValidateRPN(const MP_TokenList list, int *error);
-static MP_TokenList MP_InfixToRPN(const MP_TokenList input_list);
-static void MP_DoOperation(FloatVector result, int op);
+static MP_TokenArray MP_ParseTokens(const char *str, const MP_Var *vars, int num_vars, int *error);
+static void MP_CheckMatchingBrackets(const MP_TokenArray *list, int *error);
+static void MP_CheckUnaryOperators(MP_TokenArray *list);
+static void MP_ValidateRPN(const MP_TokenArray *list, int *max_depth, int *error);
+static MP_TokenArray MP_InfixToRPN(const MP_TokenArray *input_list);
+static void MP_DoOperation(float **sp, int op);
 
-static CharVector MP_CleanWhitespace(const char *str) {
-	CharVector cleaned = NULL;
-	int len;
+static char * MP_CleanWhitespace(const char *str) {
+	char * cleaned = NULL;
+	int len, count;
 
 	len = strlen(str);
+	count = 0;
+
+	cleaned = (char *) malloc(len + 1);
 
 	for(int i = 0; i < len; i++) {
 		if(isspace(str[i])) {
 			continue;
 		}
 
-		arrput(cleaned, str[i]);
+		cleaned[count++] = str[i];
 	}
 
-	arrput(cleaned, '\0');
+	cleaned[count] = '\0';
 
 	return cleaned;
 }
@@ -271,7 +367,7 @@ static bool MP_FindNumber(const char *str, int len, MP_Token *token) {
 
 	for(int i = 0; i < len; i++) {
 		if(str[i] == '.') continue;
-		num = 10 * num + (int) (str[i] - '0');
+		num = 10 * num + (str[i] - '0');
 	}
 
 	for(int i = 0; i < num_div_by_ten; i++) {
@@ -318,14 +414,15 @@ static bool MP_FindVarNum(const char *str, int i, int prev_token_offset, const M
 	return false;
 }
 
-static MP_TokenList MP_ParseTokens(const char *str, const MP_Var *vars, int num_vars, int *error) {
-	MP_TokenList list = NULL;
-
+static MP_TokenArray MP_ParseTokens(const char *str, const MP_Var *vars, int num_vars, int *error) {
+	MP_TokenArray list;
 	int i, prev_token_offset, len;
 
 	i = 0;
 	prev_token_offset = 0;
 	len = strlen(str);
+
+	list = MP_ACREATE(len);
 
 	while(i < len) {
 		MP_Token token;
@@ -353,12 +450,12 @@ static MP_TokenList MP_ParseTokens(const char *str, const MP_Var *vars, int num_
 				return list;
 			}
 
-			arrput(list, token_num);
+			MP_APUSH(list, token_num);
 		}
 
 		prev_token_offset = i + jump_len;
 
-		arrput(list, token);
+		MP_APUSH(list, token);
 
 		i += jump_len;
 	}
@@ -380,19 +477,19 @@ static MP_TokenList MP_ParseTokens(const char *str, const MP_Var *vars, int num_
 			return list;
 		}
 
-		arrput(list, token_num);
+		MP_APUSH(list, token_num);
 	}
 
 	return list;
 }
 
-static void MP_CheckMatchingBrackets(const MP_TokenList list, int *error) {
+static void MP_CheckMatchingBrackets(const MP_TokenArray *list, int *error) {
 	int num_brackets = 0;
 
-	for(int i = 0; i < arrlen(list); i++) {
-		if(list[i].type == MP_TOKENTYPE_OPEN_BRACKET) {
+	for(int i = 0; i < list->len; i++) {
+		if(list->data[i].type == MP_TOKENTYPE_OPEN_BRACKET) {
 			num_brackets++;
-		} else if(list[i].type == MP_TOKENTYPE_CLOSE_BRACKET) {
+		} else if(list->data[i].type == MP_TOKENTYPE_CLOSE_BRACKET) {
 			num_brackets--;
 		}
 
@@ -406,12 +503,12 @@ static void MP_CheckMatchingBrackets(const MP_TokenList list, int *error) {
 	}
 }
 
-static void MP_CheckUnaryOperators(MP_TokenList list) {
+static void MP_CheckUnaryOperators(MP_TokenArray *list) {
 	MP_Token *prev = NULL, *curr = NULL;
 
-	for(int i = 0; i < arrlen(list); i++) {
-		if(i != 0) prev = &list[i - 1];
-		curr = &list[i];
+	for(int i = 0; i < list->len; i++) {
+		if(i != 0) prev = &list->data[i - 1];
+		curr = &list->data[i];
 
 		if(curr->type != MP_TOKENTYPE_OPERATION) {
 			continue;
@@ -440,11 +537,12 @@ static void MP_CheckUnaryOperators(MP_TokenList list) {
 	}
 }
 
-static void MP_ValidateRPN(const MP_TokenList list, int *error) {
+static void MP_ValidateRPN(const MP_TokenArray *list, int *max_depth, int *error) {
 	int depth = 0, arity = 0;
+	*max_depth = 1;
 
-	for(int i = 0; i < arrlen(list); i++) {
-		const MP_Token *token = &list[i];
+	for(int i = 0; i < list->len; i++) {
+		const MP_Token *token = &list->data[i];
 
 		switch(token->type) {
 			case MP_TOKENTYPE_VARIABLE:
@@ -464,6 +562,8 @@ static void MP_ValidateRPN(const MP_TokenList list, int *error) {
 			default:
 				break;
 		}
+
+		if(depth > *max_depth) *max_depth = depth;
 	}
 
 	if(depth != 1) {
@@ -471,50 +571,52 @@ static void MP_ValidateRPN(const MP_TokenList list, int *error) {
 	}
 }
 
-static MP_TokenList MP_InfixToRPN(const MP_TokenList input_list) {
-	MP_TokenList operation_stack = NULL;
-	MP_TokenList output = NULL;
+static MP_TokenArray MP_InfixToRPN(const MP_TokenArray *input_list) {
+	MP_TokenArray operation_stack, output;
 
-	for(int i = 0; i < arrlen(input_list); i++) {
-		const MP_Token *current = &input_list[i];
+	operation_stack = MP_ACREATE(input_list->len);
+	output = MP_ACREATE(input_list->len);
+
+	for(int i = 0; i < input_list->len; i++) {
+		const MP_Token *current = &input_list->data[i];
 
 		switch(current->type) {
 			case MP_TOKENTYPE_OPEN_BRACKET:
-				arrput(operation_stack, *current);
+				MP_APUSH(operation_stack, *current);
 				break;
 
 			case MP_TOKENTYPE_VARIABLE:
 			case MP_TOKENTYPE_NUMBER:
-				arrput(output, *current);
+				MP_APUSH(output, *current);
 				break;
 
 			case MP_TOKENTYPE_OPERATION:
 				while(1) {
-					if(arrlen(operation_stack) == 0 || arrlast(operation_stack).type == MP_TOKENTYPE_OPEN_BRACKET) {
-						arrput(operation_stack, *current);
+					if(operation_stack.len == 0 || MP_ALAST(operation_stack).type == MP_TOKENTYPE_OPEN_BRACKET) {
+						MP_APUSH(operation_stack, *current);
 						break;
 					}
 
-					MP_Token *top = &arrlast(operation_stack);
+					MP_Token *top = &MP_ALAST(operation_stack);
 
 					if(mp_op_prec[current->data.operation] > mp_op_prec[top->data.operation]) {
-						arrput(operation_stack, *current);
+						MP_APUSH(operation_stack, *current);
 						break;
 					} else {
-						arrpush(output, *top);
-						arrpop(operation_stack);
+						MP_APUSH(output, *top);
+						(void) MP_APOP(operation_stack);
 					}
 				}
 				break;
 
 			case MP_TOKENTYPE_CLOSE_BRACKET:
-				while(arrlen(operation_stack) > 0) {
-					if(arrlast(operation_stack).type == MP_TOKENTYPE_OPEN_BRACKET) {
-						arrpop(operation_stack);
+				while(operation_stack.len) {
+					if(MP_ALAST(operation_stack).type == MP_TOKENTYPE_OPEN_BRACKET) {
+						(void) MP_APOP(operation_stack);
 						break;
 					}
 
-					arrpush(output, arrpop(operation_stack));
+					MP_APUSH(output, MP_APOP(operation_stack));
 				}
 				break;
 
@@ -523,31 +625,32 @@ static MP_TokenList MP_InfixToRPN(const MP_TokenList input_list) {
 		}
 	}
 
-	while(arrlen(operation_stack) > 0) {
-		arrpush(output, arrpop(operation_stack));
+	while(operation_stack.len > 0) {
+		MP_APUSH(output, MP_APOP(operation_stack));
 	}
 	
-	arrfree(operation_stack);
+	MP_AFREE(operation_stack);
 
 	return output;
 }
 
-static void MP_DoOperation(FloatVector result, int op) {
+static void MP_DoOperation(float **sp, int op) {
 	#define EXPAND_AS_CASE(id, func, macro_num_args, ...) \
-		case id: macro_num_args(result, func); break;
+		case id: macro_num_args(*sp, func); break;
 	switch(op) {
 		FOR_MP_OP(EXPAND_AS_CASE)
-		FOR_MP_MFUNC(EXPAND_AS_CASE)
 		#ifdef FOR_MP_CFUNC
 		#define CUSTOM_EXPAND_AS_CASE(func, macro_num_args, ...) \
-			case MP_CFUNC_ID(func): macro_num_args(result, func); break;
+			case MP_CFUNC_ID(func): macro_num_args(*sp, func); break;
 		FOR_MP_CFUNC(CUSTOM_EXPAND_AS_CASE)
 		#undef CUSTOM_EXPAND_AS_CASE
 		#endif
+		FOR_MP_MFUNC(EXPAND_AS_CASE)
 	}
 	#undef EXPAND_AS_CASE
 }
 
+#ifdef MP_DEBUG
 void MP_DebugPrintToken(const MP_Token *token) {
 	switch(token->type) {
 		case MP_TOKENTYPE_OPEN_BRACKET:
@@ -572,88 +675,84 @@ void MP_DebugPrintToken(const MP_Token *token) {
 	}
 }
 
-void MP_DebugPrintTokenList(MP_TokenList list) {
-	for(int i = 0; i < arrlen(list); i++) {
-		MP_DebugPrintToken(&list[i]);
+void MP_DebugPrintTokenArray(const MP_TokenArray *list) {
+	for(int i = 0; i < list->len; i++) {
+		MP_DebugPrintToken(&list->data[i]);
 		printf(" ");
 	}
 	printf("\n");
 }
 
 void MP_DebugPrintExpr(const MP_Expr *expr) {
-	MP_DebugPrintTokenList(expr->output);
+	MP_DebugPrintTokenArray(&expr->output);
 }
+#endif /* MP_DEBUG */
 
 MP_Expr MP_Compile(const char *str, const MP_Var *vars, int num_vars, int *error) {
-	MP_Expr expr;
+	MP_Expr expr = {0};
 
-	MP_TokenList input_list = NULL;
-	CharVector cleaned_str = NULL;
+	MP_TokenArray input_list;
+	char * cleaned_str = NULL;
 	int internal_error = 0;
 
 	cleaned_str = MP_CleanWhitespace(str);
-	expr.output = NULL;
 
 	input_list = MP_ParseTokens(cleaned_str, vars, num_vars, &internal_error);
 	if(internal_error) {
 		goto mp_compile_end;
 	}
 
-	MP_CheckMatchingBrackets(input_list, &internal_error);
+	MP_CheckMatchingBrackets(&input_list, &internal_error);
 	if(internal_error) {
 		goto mp_compile_end;
 	}
 
-	MP_CheckUnaryOperators(input_list);
+	MP_CheckUnaryOperators(&input_list);
 
-	expr.output = MP_InfixToRPN(input_list);
+	expr.output = MP_InfixToRPN(&input_list);
 
-	MP_ValidateRPN(expr.output, &internal_error);
+	MP_ValidateRPN(&expr.output, &expr.max_depth, &internal_error);
 
 	if(internal_error) {
-		arrfree(expr.output);
-		expr.output = NULL;
+		MP_AFREE(expr.output);
 		goto mp_compile_end;
 	}
 
 mp_compile_end:
 	if(error != NULL) *error = internal_error;
-
-	arrfree(input_list);
-	arrfree(cleaned_str);
+	free(cleaned_str);
+	MP_AFREE(input_list);
 
 	return expr;
 }
 
 void MP_Free(MP_Expr *expr) {
-	arrfree(expr->output);
+	MP_AFREE(expr->output);
 }
 
 float MP_Eval(const MP_Expr *expr) {
-	int len;
-	FloatVector result = NULL;
-	float final_res = 0.0f;
+	float stack[expr->max_depth], *sp;
 
-	len = arrlen(expr->output);
+	sp = stack;
 
-	if(len == 0) {
+	if(expr->output.len == 0) {
 		return 0.0f;
 	}
 
-	for(int i = 0; i < len; i++) {
-		const MP_Token *token = &expr->output[i];
+	for(int i = 0; i < expr->output.len; i++) {
+		const MP_Token *token = &expr->output.data[i];
 
 		switch(token->type) {
 			case MP_TOKENTYPE_NUMBER:
-				arrput(result, token->data.number);
+				*(sp++) = token->data.number;
 				break;
 
 			case MP_TOKENTYPE_VARIABLE:
-				arrput(result, *token->data.variable);
+				*(sp++) = *(token->data.variable);
 				break;
 
 			case MP_TOKENTYPE_OPERATION:
-				MP_DoOperation(result, token->data.operation);
+				MP_DoOperation(&sp, token->data.operation);
 				break;
 
 			default:
@@ -661,11 +760,7 @@ float MP_Eval(const MP_Expr *expr) {
 		}
 	}
 
-	final_res = arrlast(result);
-
-	arrfree(result);
-
-	return final_res;
+	return stack[0];
 }
 
 #endif /* MPARSE_IMPLEMENTATION */
