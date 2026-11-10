@@ -54,6 +54,10 @@ if(error == 0) {
 The expression read by `MP_Eval` must be a valid expression, compiled with no
 errors. If it is not a valid expression, it will return 0.0f as a fallback.
 
+MParse is written in C99 and its implementation is not compatible with standard
+C++. The implementation **must be in a C source file if you use it on a C++
+project**.
+
 # Variables
 
 `MP_Compile` accepts a `MP_StrArray`, an array of strings containing the names
