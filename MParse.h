@@ -1,6 +1,3 @@
-#ifndef MPARSE_H
-#define MPARSE_H
-
 /* LICENSE
 Copyright (c) 2026 Gabriel Martins
 
@@ -28,7 +25,7 @@ USAGE
 MParser is a header-only library for parsing and evaluating mathematical
 expressions.
 
-Define MPARSE_IMPLEMENTATION in a **single** source file before
+Define MPARSE_IMPLEMENTATION in a **single** C source file before
 including the library:
 
 	#define MPARSE_IMPLEMENTATION
@@ -88,6 +85,13 @@ The first argument is the C function. The second argument is the number
 of arguments the function takes (MP_FUNC1, MP_FUNC2, MP_FUNC3). The
 third argument is the name of the function in the expression.
 */
+
+#ifndef MPARSE_H
+#define MPARSE_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #define MP_FUNC1(sp, func) \
 	do { \
@@ -158,6 +162,10 @@ typedef const char *const *MP_StrArray;
 MP_Expr MP_Compile(const char *str, MP_StrArray vars, int num_vars, int *error);
 void MP_Free(MP_Expr *expr);
 float MP_Eval(const MP_Expr *expr, const float *vars);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* MPARSE_H */
 
